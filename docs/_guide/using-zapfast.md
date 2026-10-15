@@ -599,7 +599,11 @@ The chips under the search bar narrow the list to **Unread**, **Private**
 Followed channels have their own **Channels** chip. **Archived**, in the rail
 on the left above **Settings**, opens the archived chats in the list, and
 shows how many of them are unread. A chip with unread chats shows how many it
-has. Click the active chip again, or **All**, to see every chat. The
+has. Click the active chip again, or **All**, to see every chat. Rest the
+pointer on a chip for a moment and a pin fades in on its corner: click it to
+make that chip the list's home filter, so the list opens on it at the next
+start and a second click on the active chip returns to it. Click the pin
+again to let go. The
 filter applies only to this list: search and the archive still show everything.
 ZapFast remembers the chip or label each account last showed and comes back
 to it at the next start.

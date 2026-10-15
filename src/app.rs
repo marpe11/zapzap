@@ -2413,6 +2413,21 @@ impl App {
         }
     }
 
+    /// The chip pinned as the chat list's home filter, if one is. Pinning
+    /// **All** stores nothing: every chat is the home filter already.
+    pub fn pinned_filter(&self) -> Option<ChatFilter> {
+        match self
+            .account()
+            .settings
+            .pinned_filter
+            .as_deref()
+            .and_then(crate::model::ListFilter::parse)
+        {
+            Some(crate::model::ListFilter::Chip(chip)) => Some(chip),
+            _ => None,
+        }
+    }
+
     /// The label the active account's chat list showed when it was last
     /// used, which waits for the account's labels to arrive.
     fn remembered_label(&self) -> Option<String> {
@@ -7677,6 +7692,18 @@ impl App {
                 self.show_archived = false;
                 self.unread_kept.clear();
                 self.remember_list_filter();
+            }
+            Action::PinChatFilter(filter) => {
+                // Pinning the pinned chip lets go of it, and pinning All
+                // stores nothing: every chat is the home filter already.
+                let next = (self.pinned_filter() != Some(filter))
+                    .then_some(filter)
+                    .filter(|filter| *filter != ChatFilter::All);
+                let key = next.and_then(|filter| crate::model::ListFilter::key(filter, None));
+                if self.account().settings.pinned_filter != key {
+                    self.account_mut().settings.pinned_filter = key;
+                    self.account_mut().mark_settings_dirty();
+                }
             }
             Action::SetCallFilter(filter) => {
                 self.call_filter = filter;
@@ -14448,6 +14475,49 @@ mod tests {
 
         app.apply(Action::SetChatFilter(ChatFilter::All), &ctx);
         assert_eq!(app.account().settings.list_filter, None);
+    }
+
+    /// A pinned chip is the list's home filter: it wins at startup over the
+    /// chip the list last showed, and pinning it again, or pinning All, lets
+    /// go of it.
+    #[test]
+    fn a_pinned_chip_is_the_lists_home_filter() {
+        let ctx = egui::Context::default();
+        let restart = |settings: crate::settings::AccountSettings| {
+            let root = tempfile::tempdir().unwrap();
+            let dirs = AppDirs::under(root.path());
+            let (account, _events) =
+                Account::detached(&dirs, AccountId::first(), settings).unwrap();
+            let roster = AccountRoster {
+                active: account.id.0.clone(),
+                ..AccountRoster::default()
+            };
+            let app = App::with_accounts(
+                dirs,
+                Settings::default(),
+                roster,
+                vec![account],
+                0,
+                Waker::default(),
+            );
+            (app, root)
+        };
+        let mut app = app();
+        app.apply(Action::SetChatFilter(ChatFilter::Groups), &ctx);
+        app.apply(Action::PinChatFilter(ChatFilter::Unread), &ctx);
+        assert_eq!(app.pinned_filter(), Some(ChatFilter::Unread));
+        assert_eq!(
+            app.account().settings.pinned_filter.as_deref(),
+            Some("unread")
+        );
+        let (again, _root) = restart(app.account().settings.clone());
+        assert_eq!(again.chat_filter, ChatFilter::Unread);
+
+        // Pinning the pinned chip lets go of it; pinning All stores nothing.
+        app.apply(Action::PinChatFilter(ChatFilter::Unread), &ctx);
+        assert_eq!(app.account().settings.pinned_filter, None);
+        app.apply(Action::PinChatFilter(ChatFilter::All), &ctx);
+        assert_eq!(app.account().settings.pinned_filter, None);
     }
 
     #[test]

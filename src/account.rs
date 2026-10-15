@@ -130,14 +130,17 @@ impl Account {
         backend: Backend,
     ) -> Self {
         let open_chat = settings.last_chat.clone();
-        let chat_filter = match settings
-            .list_filter
-            .as_deref()
-            .and_then(crate::model::ListFilter::parse)
-        {
-            Some(crate::model::ListFilter::Chip(chip)) => chip,
-            _ => ChatFilter::All,
-        };
+        // A pinned chip is the list's home filter and wins over the chip or
+        // label the list last showed.
+        let chat_filter = [&settings.pinned_filter, &settings.list_filter]
+            .into_iter()
+            .find_map(
+                |key| match key.as_deref().and_then(crate::model::ListFilter::parse) {
+                    Some(crate::model::ListFilter::Chip(chip)) => Some(chip),
+                    _ => None,
+                },
+            )
+            .unwrap_or_default();
         let call_filter = crate::model::CallFilter::parse(settings.call_filter.as_deref());
         Self {
             id,

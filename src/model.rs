@@ -2661,6 +2661,9 @@ pub enum Action {
     CloseDialog,
     ToggleSidebar,
     SetChatFilter(ChatFilter),
+    /// Pins a chip as the chat list's home filter, or lets go of it when it
+    /// is the pinned one already.
+    PinChatFilter(ChatFilter),
     /// Picks the chip the Calls page's history shows.
     SetCallFilter(CallFilter),
     /// Picks the label the chat list shows; `None` shows every chat.

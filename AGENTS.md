@@ -126,6 +126,12 @@ protocol. These notes are for coding agents and new contributors.
   replayed mutations means a phone without favorites. A blind write would
   replace the phone's list. Channels are never favorites. The Favorites chip
   follows the list order; pins stay global and first in every chip.
+  A filter chip can be pinned as the chat list's home filter
+  (`Action::PinChatFilter`, `settings.pinned_filter`): it wins over the
+  remembered list filter at startup (`Account::new`), and a second click on
+  the active chip returns to it instead of All. The pin badge fades in after
+  the pointer rests on a chip (`ui::chats::pin_badge`, `PIN_HOVER_DELAY`),
+  and pinning All stores nothing.
 - Interactive messages are parsed in `backend/worker/interactive.rs`. Views receive
   labels and local capabilities, never protocol option ids. `ReplyInteractive`
   carries only the archived message id and visible button/choice indices;

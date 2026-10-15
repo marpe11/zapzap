@@ -2600,6 +2600,14 @@ msgstr "Maximizar"
 msgid "Restore"
 msgstr "Restaurar"
 
+#: src/ui/chats.rs
+msgid "Pin this filter"
+msgstr "Fixar este filtro"
+
+#: src/ui/chats.rs
+msgid "Unpin this filter"
+msgstr "Desafixar este filtro"
+
 #~ msgid "Back to the chats"
 #~ msgstr "Voltar para as conversas"
 

@@ -2494,3 +2494,11 @@ msgstr ""
 #: src/ui/mod.rs:867
 msgid "Restore"
 msgstr ""
+
+#: src/ui/chats.rs
+msgid "Pin this filter"
+msgstr ""
+
+#: src/ui/chats.rs
+msgid "Unpin this filter"
+msgstr ""

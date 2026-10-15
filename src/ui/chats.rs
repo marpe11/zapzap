@@ -1,5 +1,7 @@
 //! The left panel: the chat list.
 
+use std::time::{Duration, Instant};
+
 use egui::{Align, Frame, Key, Layout, Margin, Rect, Sense, Vec2, pos2, vec2};
 
 use crate::app::App;
@@ -646,9 +648,14 @@ fn filter_chips(app: &mut App, ui: &mut egui::Ui) {
                 } else {
                     chip
                 };
-                if chip.clicked() {
-                    // A second click on the active chip returns to every chat.
-                    let next = if selected { ChatFilter::All } else { filter };
+                if chip.clicked() && !pin_badge(app, ui, filter, &chip) {
+                    // A second click on the active chip returns to the home
+                    // filter: the pinned one, else every chat.
+                    let next = if selected {
+                        app.pinned_filter().unwrap_or(ChatFilter::All)
+                    } else {
+                        filter
+                    };
                     app.actions.push(Action::SetChatFilter(next));
                 }
             }
@@ -666,6 +673,104 @@ fn filter_chips(app: &mut App, ui: &mut egui::Ui) {
         }
     }
     labels::chip_row(app, ui, &palette);
+}
+
+/// How long the pointer rests on a filter chip before its pin badge fades in.
+const PIN_HOVER_DELAY: Duration = Duration::from_millis(1500);
+
+/// A filter chip's pin badge: a pin on the chip's top corner that fixes the
+/// filter as the chat list's home. It stays on the pinned chip, and fades in
+/// on any chip the pointer has rested on for [`PIN_HOVER_DELAY`]. Clicking
+/// the badge pins or unpins instead of picking the filter; returns whether
+/// the badge took this frame's click.
+fn pin_badge(app: &mut App, ui: &mut egui::Ui, filter: ChatFilter, chip: &egui::Response) -> bool {
+    let ctx = ui.ctx().clone();
+    let palette = app.palette;
+    let pinned = app.pinned_filter() == Some(filter);
+    let pin_rect = Rect::from_center_size(
+        pos2(chip.rect.right() - 4.0, chip.rect.top() + 4.0),
+        Vec2::splat(18.0),
+    );
+    let hover_id = egui::Id::new(("chat-filter-hover", filter as u8));
+    let now = Instant::now();
+    let mut fade = 1.0;
+    if pinned {
+        ctx.data_mut(|data| data.remove::<Instant>(hover_id));
+    } else {
+        let hovered = chip.hovered()
+            || ctx
+                .input(|input| input.pointer.latest_pos())
+                .is_some_and(|pointer| pin_rect.contains(pointer));
+        let Some(since) = (if hovered {
+            match ctx.data(|data| data.get_temp::<Instant>(hover_id)) {
+                Some(since) => Some(since),
+                None => {
+                    ctx.data_mut(|data| data.insert_temp(hover_id, now));
+                    Some(now)
+                }
+            }
+        } else {
+            ctx.data_mut(|data| data.remove::<Instant>(hover_id));
+            None
+        }) else {
+            return false;
+        };
+        let waited = now.duration_since(since);
+        if waited < PIN_HOVER_DELAY {
+            // The badge appears on its own while the pointer rests there.
+            ctx.request_repaint_after(PIN_HOVER_DELAY - waited);
+            return false;
+        }
+        fade = ((waited - PIN_HOVER_DELAY).as_secs_f32() / 0.25).clamp(0.0, 1.0);
+        if fade < 1.0 {
+            ctx.request_repaint();
+        }
+    }
+    let pin = ui.interact(
+        pin_rect,
+        egui::Id::new(("chat-filter-pin", filter as u8)),
+        Sense::click(),
+    );
+    if ui.is_rect_visible(pin_rect) {
+        let radius = pin_rect.width() / 2.0;
+        ui.painter().circle_filled(
+            pin_rect.center(),
+            radius,
+            palette.panel.gamma_multiply(fade),
+        );
+        ui.painter().circle_stroke(
+            pin_rect.center(),
+            radius,
+            egui::Stroke::new(1.0, palette.outline.gamma_multiply(fade)),
+        );
+        let color = if pinned {
+            palette.accent
+        } else {
+            palette.secondary
+        };
+        Icon::Pin.image(color.gamma_multiply(fade), 10.0).paint_at(
+            ui,
+            Rect::from_center_size(pin_rect.center(), Vec2::splat(10.0)),
+        );
+    }
+    pin.clone()
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(
+            crate::i18n::gettext(
+                app.locale,
+                if pinned {
+                    "Unpin this filter"
+                } else {
+                    "Pin this filter"
+                },
+            )
+            .into_owned(),
+        );
+    if pin.clicked() {
+        app.actions.push(Action::PinChatFilter(filter));
+        return true;
+    }
+    false
 }
 
 /// Stable id for a starred row, so its menu can be addressed by the demo,
