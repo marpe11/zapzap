@@ -1,6 +1,6 @@
 //! The left panel: the chat list.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use egui::{Align, Frame, Key, Layout, Margin, Rect, Sense, Vec2, pos2, vec2};
 
@@ -648,7 +648,8 @@ fn filter_chips(app: &mut App, ui: &mut egui::Ui) {
                 } else {
                     chip
                 };
-                if chip.clicked() && !pin_badge(app, ui, filter, &chip) {
+                let pin_took_click = pin_badge(app, ui, filter, &chip);
+                if chip.clicked() && !pin_took_click {
                     // A second click on the active chip returns to the home
                     // filter: the pinned one, else every chat.
                     let next = if selected {
@@ -675,8 +676,9 @@ fn filter_chips(app: &mut App, ui: &mut egui::Ui) {
     labels::chip_row(app, ui, &palette);
 }
 
-/// How long the pointer rests on a filter chip before its pin badge fades in.
-const PIN_HOVER_DELAY: Duration = Duration::from_millis(1500);
+/// Seconds the pointer rests on a filter chip before its pin badge fades in.
+/// The frame's own clock (`input.time`), so tests drive it.
+const PIN_HOVER_DELAY: f64 = 1.5;
 
 /// A filter chip's pin badge: a pin on the chip's top corner that fixes the
 /// filter as the chat list's home. It stays on the pinned chip, and fades in
@@ -692,36 +694,35 @@ fn pin_badge(app: &mut App, ui: &mut egui::Ui, filter: ChatFilter, chip: &egui::
         Vec2::splat(18.0),
     );
     let hover_id = egui::Id::new(("chat-filter-hover", filter as u8));
-    let now = Instant::now();
+    let now = ctx.input(|input| input.time);
     let mut fade = 1.0;
     if pinned {
-        ctx.data_mut(|data| data.remove::<Instant>(hover_id));
+        ctx.data_mut(|data| data.remove::<f64>(hover_id));
     } else {
         let hovered = chip.hovered()
             || ctx
                 .input(|input| input.pointer.latest_pos())
                 .is_some_and(|pointer| pin_rect.contains(pointer));
         let Some(since) = (if hovered {
-            match ctx.data(|data| data.get_temp::<Instant>(hover_id)) {
-                Some(since) => Some(since),
-                None => {
-                    ctx.data_mut(|data| data.insert_temp(hover_id, now));
-                    Some(now)
-                }
-            }
+            // egui's temp data lives one frame: reinsert to keep it alive.
+            let since = ctx
+                .data(|data| data.get_temp::<f64>(hover_id))
+                .unwrap_or(now);
+            ctx.data_mut(|data| data.insert_temp(hover_id, since));
+            Some(since)
         } else {
-            ctx.data_mut(|data| data.remove::<Instant>(hover_id));
+            ctx.data_mut(|data| data.remove::<f64>(hover_id));
             None
         }) else {
             return false;
         };
-        let waited = now.duration_since(since);
+        let waited = now - since;
         if waited < PIN_HOVER_DELAY {
             // The badge appears on its own while the pointer rests there.
-            ctx.request_repaint_after(PIN_HOVER_DELAY - waited);
+            ctx.request_repaint_after(Duration::from_secs_f64(PIN_HOVER_DELAY - waited));
             return false;
         }
-        fade = ((waited - PIN_HOVER_DELAY).as_secs_f32() / 0.25).clamp(0.0, 1.0);
+        fade = ((waited - PIN_HOVER_DELAY) / 0.25).clamp(0.0, 1.0) as f32;
         if fade < 1.0 {
             ctx.request_repaint();
         }
@@ -2780,6 +2781,76 @@ mod tests {
             all(&ctx).left() < before - 1.0,
             "a vertical wheel left the filter chips at {before}, now {}",
             all(&ctx).left()
+        );
+    }
+
+    /// Resting the pointer on a filter chip fades its pin badge in after a
+    /// moment. A quick click still picks the filter; once the badge shows, a
+    /// click on it pins the filter instead.
+    #[test]
+    fn resting_the_pointer_on_a_chip_reveals_its_pin_badge() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _events) =
+            App::headless(AppDirs::under(directory.path()), Settings::default());
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        let frame = |app: &mut App, time, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 400.0))),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| filter_chips(app, ui),
+            );
+            output.textures_delta.clear();
+        };
+        let chip = |ctx: &egui::Context| {
+            ctx.data(|data| data.get_temp::<Rect>(filter_chip_id(ChatFilter::Unread)))
+                .expect("the filter chips are drawn")
+        };
+        let pin = |chip: Rect| egui::pos2(chip.right() - 4.0, chip.top() + 4.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut app, 0.0, vec![]);
+
+        // A quick click picks the filter: the badge has not shown yet.
+        frame(
+            &mut app,
+            0.1,
+            vec![egui::Event::PointerMoved(chip(&ctx).center())],
+        );
+        let at = pin(chip(&ctx));
+        frame(&mut app, 0.2, vec![button(at, true)]);
+        frame(&mut app, 0.3, vec![button(at, false)]);
+        assert_eq!(
+            app.actions.as_slice(),
+            &[Action::SetChatFilter(ChatFilter::Unread)],
+            "clicking before the badge shows picks the filter: {:?}",
+            app.actions
+        );
+        app.actions.clear();
+
+        // Resting past PIN_HOVER_DELAY fades the badge in; clicking it pins.
+        frame(
+            &mut app,
+            1.0,
+            vec![egui::Event::PointerMoved(chip(&ctx).center())],
+        );
+        let at = pin(chip(&ctx));
+        frame(&mut app, 3.0, vec![egui::Event::PointerMoved(at)]);
+        frame(&mut app, 3.1, vec![button(at, true)]);
+        frame(&mut app, 3.2, vec![button(at, false)]);
+        assert_eq!(
+            app.actions.as_slice(),
+            &[Action::PinChatFilter(ChatFilter::Unread)],
+            "clicking the badge pins the filter: {:?}",
+            app.actions
         );
     }
 
